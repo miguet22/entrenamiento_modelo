@@ -1,0 +1,4 @@
+opencv-python>=4.8.0
+colorama>=0.4.6
+tqdm>=4.66.0
+ultralytics>=8.0.0
