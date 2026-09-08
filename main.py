@@ -3,6 +3,7 @@ Programa principal para análisis de video y detección de choques mediante IA.
 Soporta:
   1. Archivos de video locales (Buscador de Microsoft)
   2. Cámaras Wi-Fi / IP en vivo (RTSP / HTTP)
+  3. Cámara integrada o USB de la PC
 """
 import os
 import sys
@@ -14,6 +15,8 @@ from colorama import init, Fore, Style
 import config
 from file_picker import select_video_file
 from detector import CrashDetector
+from crash_filter import CrashFilter
+from helmet_monitor import HelmetMonitor
 
 # Inicializar colorama para colores en la consola
 init(autoreset=True)
@@ -36,13 +39,14 @@ def get_source_selection():
     print(Fore.WHITE + Style.BRIGHT + "Selecciona el origen del video:")
     print(Fore.GREEN + "  [1] " + Fore.WHITE + "Cargar archivo de video (Explorador de Windows)")
     print(Fore.CYAN + "  [2] " + Fore.WHITE + "Conectar a Cámara Wi-Fi / IP en Vivo (RTSP / HTTP)")
+    print(Fore.CYAN + "  [3] " + Fore.WHITE + "Usar cámara de mi PC (integrada / USB)")
     print(Fore.RED + "  [0] " + Fore.LIGHTBLACK_EX + "Salir\n")
 
     while True:
-        choice = input(Fore.YELLOW + "Elige una opción [1/2/0]: " + Fore.RESET).strip()
-        if choice in ["1", "2", "0"]:
+        choice = input(Fore.YELLOW + "Elige una opción [1/2/3/0]: " + Fore.RESET).strip()
+        if choice in ["1", "2", "3", "0"]:
             return choice
-        print(Fore.RED + "Opción inválida. Ingresa 1, 2 o 0.")
+        print(Fore.RED + "Opción inválida. Ingresa 1, 2, 3 o 0.")
 
 def main():
     print_banner()
@@ -78,6 +82,21 @@ def main():
         source_name = f"Stream en Vivo ({video_source})"
         print(Fore.GREEN + f"[✓] Conectando a stream: {video_source}")
 
+    elif choice == "3":
+        is_live_stream = True
+        print(Fore.CYAN + "\n[1/3] Configurar cámara de la PC")
+        print(Fore.LIGHTBLACK_EX + "  Usa 0 para la cámara principal; prueba 1 o 2 si tienes otra cámara USB.")
+        while True:
+            camera_index = input(Fore.YELLOW + "Número de cámara [Enter para 0]: " + Fore.RESET).strip()
+            try:
+                video_source = int(camera_index or "0")
+                if video_source >= 0:
+                    break
+            except ValueError:
+                pass
+            print(Fore.RED + "Ingresa un número entero mayor o igual a 0.")
+        source_name = f"Cámara de la PC ({video_source})"
+
     # 2. Inicializar el detector de IA
     print(Fore.WHITE + "\n[2/3] Inicializando modelo de IA...")
     detector = CrashDetector(
@@ -88,14 +107,17 @@ def main():
     )
 
     # 3. Abrir la fuente de video con OpenCV
-    if is_live_stream:
+    if choice == "2":
         # Optimización de buffer para streams RTSP/HTTP en vivo
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;udp|fflags;nobuffer|max_delay;500000"
     
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
+        cap.release()
         print(Fore.RED + f"\n[ERROR] No se pudo conectar o abrir la fuente de video: {video_source}")
-        if is_live_stream:
+        if choice == "3":
+            print(Fore.YELLOW + "[TIP] Habilita el acceso a la cámara para aplicaciones de escritorio en Windows, cierra otras apps que la usen o prueba otro número de cámara.")
+        elif choice == "2":
             print(Fore.YELLOW + "[TIP] Verifica que el dispositivo esté en la misma red Wi-Fi y que la IP/puerto sean correctos.")
         return
 
@@ -119,7 +141,8 @@ def main():
     if not is_live_stream:
         print(Fore.LIGHTCYAN_EX + f"    • Duración   : {format_timestamp(duration_sec)} ({total_frames} frames)")
     else:
-        print(Fore.GREEN + "    • Modo       : TRANSMISIÓN EN VIVO CONTINUA (Wi-Fi/IP)")
+        camera_type = "PC / USB" if choice == "3" else "Wi-Fi/IP"
+        print(Fore.GREEN + f"    • Modo       : TRANSMISIÓN EN VIVO CONTINUA ({camera_type})")
     
     print(Fore.CYAN + "-" * 70)
     print(Fore.YELLOW + "Iniciando análisis... (Presiona 'Q' en la ventana del video para detener)\n")
@@ -132,17 +155,37 @@ def main():
 
     # Control de eventos detectados
     crash_events = []
+    helmet_events = []
     current_event = None
     frame_idx = 0
-    last_crash_frame = -9999
-    start_time_real = time.time()
+    crash_filter = CrashFilter(
+        min_frames=config.CRASH_CONFIRM_FRAMES,
+        confirm_seconds=config.CRASH_CONFIRM_SECONDS,
+        cooldown_seconds=config.CRASH_COOLDOWN_SECONDS,
+        clear_seconds=config.CRASH_CLEAR_SECONDS,
+    )
+    helmet_monitor = HelmetMonitor(
+        confidence=config.HELMET_CONFIDENCE_THRESHOLD,
+        min_frames=config.HELMET_CONFIRM_FRAMES,
+        confirm_seconds=config.HELMET_CONFIRM_SECONDS,
+        cooldown_seconds=config.HELMET_COOLDOWN_SECONDS,
+        clear_seconds=config.HELMET_CLEAR_SECONDS,
+        above_height=config.HELMET_ABOVE_HEIGHT,
+        side_margin=config.HELMET_SIDE_MARGIN,
+        min_iou=config.MOTO_TRACK_MIN_IOU,
+    )
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
+                if choice == "3":
+                    print(Fore.RED + "\n[!] No se pudo obtener imagen de la cámara de la PC. Revisa la conexión y los permisos, o prueba otro número de cámara.")
+                    break
                 if is_live_stream:
                     print(Fore.YELLOW + "\n[!] Pérdida de señal con la cámara Wi-Fi. Reintentando...")
+                    crash_filter.reset_candidate()
+                    helmet_monitor.reset_candidates()
                     time.sleep(1)
                     continue
                 else:
@@ -160,10 +203,34 @@ def main():
             detections = detector.predict_frame(frame)
 
             # Filtrar detecciones de choque
-            crash_dets = [d for d in detections if d.get("is_crash", False)]
+            crash_dets = [d for d in detections if d.get("is_crash", False)
+                          and d["confidence"] >= config.CRASH_CONFIDENCE_THRESHOLD]
             has_crash = len(crash_dets) > 0
 
-            if has_crash:
+            event_time = time.monotonic() if is_live_stream else current_time_sec
+            for report in helmet_monitor.update(detections, event_time):
+                helmet_events.append({
+                    "time": time_str,
+                    "frame": frame_idx,
+                    "moto_id": report["moto_id"],
+                    "confidence": report["violation_confidence"],
+                })
+                print(
+                    Fore.YELLOW + Style.BRIGHT + "[INFRACCION: SIN CASCO] " +
+                    Fore.WHITE + f"Hora/Tiempo: {time_str} | Frame #{frame_idx} " +
+                    f"| Moto #{report['moto_id']} | Al menos un ocupante sin casco " +
+                    Fore.GREEN + f"| Confianza: {report['violation_confidence'] * 100:.1f}%"
+                )
+            new_event = crash_filter.update(has_crash, event_time)
+            confirmed_crash = has_crash and crash_filter.active
+
+            if confirmed_crash and not new_event and current_event:
+                current_event["end_time"] = time_str
+                current_event["end_frame"] = frame_idx
+                current_event["max_conf"] = max(
+                    current_event["max_conf"], max(d["confidence"] for d in crash_dets))
+
+            if new_event:
                 max_conf = max(d["confidence"] for d in crash_dets)
                 class_name = crash_dets[0]["class_name"]
 
@@ -178,31 +245,22 @@ def main():
                 )
 
                 # Guardar captura automática si es stream o video
-                if config.AUTO_SAVE_CRASH_SNAPSHOT and (frame_idx - last_crash_frame > config.DEBOUNCE_FRAMES):
+                if config.AUTO_SAVE_CRASH_SNAPSHOT:
                     snap_name = f"choque_{datetime.now().strftime('%Y%m%d_%H%M%S')}_f{frame_idx}.jpg"
                     snap_path = os.path.join(config.SNAPSHOTS_DIR, snap_name)
                     cv2.imwrite(snap_path, frame)
                     print(Fore.LIGHTGREEN_EX + f"    📸 Captura guardada en: {snap_path}")
 
-                # Agrupamiento de eventos (debounce)
-                if frame_idx - last_crash_frame > config.DEBOUNCE_FRAMES:
-                    if current_event:
-                        crash_events.append(current_event)
-                    current_event = {
-                        "start_time": time_str,
-                        "end_time": time_str,
-                        "start_frame": frame_idx,
-                        "end_frame": frame_idx,
-                        "max_conf": max_conf,
-                        "class_name": class_name
-                    }
-                else:
-                    if current_event:
-                        current_event["end_time"] = time_str
-                        current_event["end_frame"] = frame_idx
-                        current_event["max_conf"] = max(current_event["max_conf"], max_conf)
-
-                last_crash_frame = frame_idx
+                if current_event:
+                    crash_events.append(current_event)
+                current_event = {
+                    "start_time": time_str,
+                    "end_time": time_str,
+                    "start_frame": frame_idx,
+                    "end_frame": frame_idx,
+                    "max_conf": max_conf,
+                    "class_name": class_name
+                }
 
             # Dibujar en el frame
             if config.SHOW_PREVIEW or config.SAVE_OUTPUT_VIDEO:
@@ -210,6 +268,10 @@ def main():
 
                 # Dibujar todas las cajas de objetos
                 for d in detections:
+                    if d.get("is_crash", False) and (
+                            not confirmed_crash
+                            or d["confidence"] < config.CRASH_CONFIDENCE_THRESHOLD):
+                        continue
                     if not config.SHOW_ALL_VEHICLES and not d.get("is_crash", False):
                         continue
 
@@ -225,7 +287,7 @@ def main():
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
                 # Banner superior si hay alerta
-                if has_crash:
+                if confirmed_crash:
                     cv2.rectangle(annotated_frame, (0, 0), (width, 42), (0, 0, 220), -1)
                     cv2.putText(annotated_frame, f"¡ALERTA: CHOQUE DETECTADO! [{time_str}]", (20, 28),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
@@ -245,7 +307,7 @@ def main():
                         scale = min(1280 / width, 720 / height)
                         display_frame = cv2.resize(annotated_frame, (int(width * scale), int(height * scale)))
 
-                    win_title = "Detector de Choques - EN VIVO (Wi-Fi)" if is_live_stream else "Detector de Choques - Video"
+                    win_title = f"Detector de Choques - EN VIVO ({camera_type})" if is_live_stream else "Detector de Choques - Video"
                     cv2.imshow(win_title, display_frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         print(Fore.YELLOW + "\n[!] Análisis detenido por el usuario.")
@@ -267,6 +329,11 @@ def main():
     print(Fore.CYAN + Style.BRIGHT + "=" * 70)
     print(Fore.WHITE + f"Total de frames analizados: {frame_idx}")
     print(Fore.WHITE + f"Total de eventos de choque detectados: {len(crash_events)}")
+    print(Fore.WHITE + f"Total de infracciones por falta de casco: {len(helmet_events)}")
+    for ev in helmet_events:
+        print(Fore.YELLOW + f"  Moto #{ev['moto_id']}: ocupante sin casco "
+              + f"| {ev['time']} | Frame {ev['frame']} "
+              + f"| Confianza: {ev['confidence'] * 100:.1f}%")
 
     if crash_events:
         print(Fore.YELLOW + "\nDetalle de eventos de impacto:")

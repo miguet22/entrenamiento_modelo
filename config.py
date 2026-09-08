@@ -18,8 +18,9 @@ ALL_CLASSES = [
     "bus",
     "car",
     "crash",
-    "moto_no_casco",
-    "motocasco",
+    "moto",
+    "casco",
+    "no_casco",
     "truck"
 ]
 
@@ -28,6 +29,9 @@ CRASH_CLASS_NAMES = ["crash"]
 
 # Colores en formato BGR para OpenCV (extraídos del dataset)
 CLASS_COLORS = {
+    "moto": (235, 183, 0),
+    "casco": (0, 200, 0),
+    "no_casco": (0, 128, 255),
     "bus": (255, 34, 134),            # #8622FF -> BGR
     "car": (0, 252, 199),            # #C7FC00 -> BGR
     "crash": (206, 255, 0),          # #00FFCE -> BGR (Verde azulado brillante)
@@ -50,7 +54,24 @@ SNAPSHOTS_DIR = "snapshots_choques"
 # --- PARÁMETROS DE DETECCIÓN ---
 # Umbral de confianza mínimo (0.25 = 25% para detectar impactos más sutiles o moderados)
 CONFIDENCE_THRESHOLD = 0.25
-DEBOUNCE_FRAMES = 15  # Frames mínimos de separación entre distintos eventos de choque
+# Filtro exclusivo de choques; no afecta la deteccion de vehiculos.
+CRASH_CONFIDENCE_THRESHOLD = 0.60
+CRASH_CONFIRM_FRAMES = 5       # Minimo de frames positivos consecutivos
+CRASH_CONFIRM_SECONDS = 0.5    # Tambien deben persistir este tiempo
+CRASH_COOLDOWN_SECONDS = 10.0  # Tiempo minimo entre alertas nuevas
+CRASH_CLEAR_SECONDS = 2.0      # Tiempo sin choque para terminar el evento
+
+# Infracciones de casco: solo reportes por consola y resumen, sin capturas.
+# Misma confirmacion temporal que choques, aplicada a cada moto por separado.
+HELMET_CONFIDENCE_THRESHOLD = CRASH_CONFIDENCE_THRESHOLD
+HELMET_CONFIRM_FRAMES = CRASH_CONFIRM_FRAMES
+HELMET_CONFIRM_SECONDS = CRASH_CONFIRM_SECONDS
+HELMET_COOLDOWN_SECONDS = CRASH_COOLDOWN_SECONDS
+HELMET_CLEAR_SECONDS = CRASH_CLEAR_SECONDS
+# Zona de cabezas: hasta 1.5 alturas sobre la moto y su mitad superior.
+HELMET_ABOVE_HEIGHT = 1.5
+HELMET_SIDE_MARGIN = 0.15      # Margen lateral proporcional al ancho de moto
+MOTO_TRACK_MIN_IOU = 0.20     # Solapamiento minimo para seguir la misma moto
 
 # --- VISUALIZACIÓN ---
 SHOW_PREVIEW = True          # Mostrar ventana con video en vivo

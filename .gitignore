@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+snapshots_choques/
+output_analisis.mp4
