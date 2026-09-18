@@ -18,6 +18,7 @@ from detector import CrashDetector
 from crash_filter import CrashFilter
 from helmet_monitor import HelmetMonitor
 from live_capture import LatestFrameCapture
+from helmet_focus import HelmetFocus
 
 # Inicializar colorama para colores en la consola
 init(autoreset=True)
@@ -31,7 +32,8 @@ def format_timestamp(seconds: float) -> str:
 def print_banner():
     print(Fore.CYAN + Style.BRIGHT + "=" * 70)
     print(Fore.YELLOW + Style.BRIGHT + "       SISTEMA DE DETECCIÓN DE CHOQUES EN VIDEO CON IA       ")
-    print(Fore.LIGHTBLACK_EX + f"       Proyecto: {config.ROBOFLOW_MODEL_ID} | Umbral: {config.CONFIDENCE_THRESHOLD * 100:.0f}%")
+    print(Fore.LIGHTBLACK_EX + f"       Proyecto: {config.ROBOFLOW_MODEL_ID}")
+    print(Fore.LIGHTBLACK_EX + "       Umbrales: auto >75%, moto >70%, casco >50%, sin casco >50%, choque >60%")
     print(Fore.LIGHTBLACK_EX + "       Clases: " + ", ".join(config.ALL_CLASSES))
     print(Fore.CYAN + Style.BRIGHT + "=" * 70 + "\n")
 
@@ -179,6 +181,60 @@ def main():
         min_iou=config.MOTO_TRACK_MIN_IOU,
     )
 
+    def handle_helmet_reports(reports, frame, time_str, frame_idx):
+        for report in reports:
+            helmet_events.append({
+                "time": time_str,
+                "frame": frame_idx,
+                "moto_id": report["moto_id"],
+                "confidence": report["violation_confidence"],
+            })
+            print(
+                Fore.YELLOW + Style.BRIGHT + "[INFRACCION: SIN CASCO] " +
+                Fore.WHITE + f"Hora/Tiempo: {time_str} | Frame #{frame_idx} " +
+                f"| Moto #{report['moto_id']} | Al menos un ocupante sin casco " +
+                Fore.GREEN + f"| Confianza: {report['violation_confidence'] * 100:.1f}%"
+            )
+            if config.AUTO_SAVE_HELMET_SNAPSHOT:
+                try:
+                    os.makedirs(config.HELMET_SNAPSHOTS_DIR, exist_ok=True)
+                    snap_name = (
+                        f"sin_casco_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                        f"_moto{report['moto_id']}_f{frame_idx}.jpg"
+                    )
+                    snap_path = os.path.join(config.HELMET_SNAPSHOTS_DIR, snap_name)
+                    if not cv2.imwrite(snap_path, frame):
+                        raise OSError("No se pudo escribir la imagen")
+                    print(Fore.LIGHTGREEN_EX + f"    Captura guardada en: {snap_path}")
+                except (OSError, cv2.error) as exc:
+                    print(Fore.RED + f"    [ERROR] No se pudo guardar la captura sin casco: {exc}")
+
+    helmet_focus = None
+    if config.HELMET_FOCUS_ENABLED and detector.model_type == 'yolo':
+        print(Fore.CYAN + '[CASCO] Preparando analisis paralelo de motos y ocupantes...')
+        try:
+            helmet_focus = HelmetFocus()
+        except Exception as exc:
+            print(Fore.YELLOW + f'[CASCO] Usando deteccion general: {exc}')
+        else:
+            print(Fore.CYAN + '[CASCO] Analisis paralelo activado.')
+
+    focus_preview = None
+    focus_preview_time = 0.0
+
+    def handle_focus_results(samples):
+        nonlocal helmet_focus, focus_preview, focus_preview_time
+        for sample in samples:
+            if 'error' in sample:
+                print(Fore.YELLOW + f"[CASCO] Enfoque no disponible: {sample['error']}. Usando deteccion general.")
+                helmet_focus.close()
+                helmet_focus = None
+                break
+            focus_preview = sample['preview']
+            focus_preview_time = time.monotonic()
+            handle_helmet_reports(sample['reports'], sample['image'],
+                                  sample['time'], sample['frame'])
+
     realtime_playback = (not is_live_stream and config.REALTIME_VIDEO_PLAYBACK
                          and not config.SAVE_OUTPUT_VIDEO)
     playback_start = time.monotonic()
@@ -206,6 +262,8 @@ def main():
                     print(Fore.YELLOW + "\n[!] Pérdida de señal con la cámara Wi-Fi. Reintentando...")
                     crash_filter.reset_candidate()
                     helmet_monitor.reset_candidates()
+                    if helmet_focus is not None:
+                        helmet_focus.reset()
                     time.sleep(1)
                     continue
                 else:
@@ -221,7 +279,8 @@ def main():
                 time_str = now.strftime("%H:%M:%S")
 
             # Inferencia con IA
-            detections = detector.predict_frame(frame)
+            detections = [d for d in detector.predict_frame(frame)
+                          if config.passes_detection_threshold(d)]
 
             # Filtrar detecciones de choque
             crash_dets = [d for d in detections if d.get("is_crash", False)
@@ -229,32 +288,12 @@ def main():
             has_crash = len(crash_dets) > 0
 
             event_time = time.monotonic() if is_live_stream else current_time_sec
-            for report in helmet_monitor.update(detections, event_time):
-                helmet_events.append({
-                    "time": time_str,
-                    "frame": frame_idx,
-                    "moto_id": report["moto_id"],
-                    "confidence": report["violation_confidence"],
-                })
-                print(
-                    Fore.YELLOW + Style.BRIGHT + "[INFRACCION: SIN CASCO] " +
-                    Fore.WHITE + f"Hora/Tiempo: {time_str} | Frame #{frame_idx} " +
-                    f"| Moto #{report['moto_id']} | Al menos un ocupante sin casco " +
-                    Fore.GREEN + f"| Confianza: {report['violation_confidence'] * 100:.1f}%"
-                )
-                if config.AUTO_SAVE_HELMET_SNAPSHOT:
-                    try:
-                        os.makedirs(config.HELMET_SNAPSHOTS_DIR, exist_ok=True)
-                        snap_name = (
-                            f"sin_casco_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-                            f"_moto{report['moto_id']}_f{frame_idx}.jpg"
-                        )
-                        snap_path = os.path.join(config.HELMET_SNAPSHOTS_DIR, snap_name)
-                        if not cv2.imwrite(snap_path, frame):
-                            raise OSError("No se pudo escribir la imagen")
-                        print(Fore.LIGHTGREEN_EX + f"    Captura guardada en: {snap_path}")
-                    except (OSError, cv2.error) as exc:
-                        print(Fore.RED + f"    [ERROR] No se pudo guardar la captura sin casco: {exc}")
+            if helmet_focus is not None:
+                helmet_focus.submit(frame, detections, event_time, time_str, frame_idx)
+                handle_focus_results(helmet_focus.poll())
+            else:
+                handle_helmet_reports(helmet_monitor.update(detections, event_time),
+                                      frame, time_str, frame_idx)
             new_event = crash_filter.update(has_crash, event_time)
             confirmed_crash = has_crash and crash_filter.active
 
@@ -336,6 +375,21 @@ def main():
                     out_writer.write(annotated_frame)
 
                 if config.SHOW_PREVIEW:
+                    if (focus_preview is not None
+                            and time.monotonic() - focus_preview_time < 0.6):
+                        ph, pw = focus_preview.shape[:2]
+                        scale = min(240 / pw, 200 / ph,
+                                    annotated_frame.shape[1] / pw,
+                                    annotated_frame.shape[0] / ph)
+                        zoom = cv2.resize(focus_preview,
+                                          (max(1, int(pw * scale)),
+                                           max(1, int(ph * scale))))
+                        zh, zw = zoom.shape[:2]
+                        annotated_frame[:zh, -zw:] = zoom
+                        cv2.putText(annotated_frame, 'ZOOM MOTO',
+                                    (annotated_frame.shape[1] - zw + 4, 16),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                                    (255, 255, 255), 1)
                     win_title = f"Detector de Choques - EN VIVO ({camera_type})" if is_live_stream else "Detector de Choques - Video"
                     if analyzed_frames == 1:
                         cv2.namedWindow(win_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -346,6 +400,12 @@ def main():
                         break
 
     finally:
+        if helmet_focus is not None:
+            try:
+                handle_focus_results(helmet_focus.finish())
+            finally:
+                if helmet_focus is not None:
+                    helmet_focus.close()
         cap.release()
         if out_writer:
             out_writer.release()

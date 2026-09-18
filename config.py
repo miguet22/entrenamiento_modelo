@@ -56,11 +56,36 @@ HELMET_SNAPSHOTS_DIR = "snapshots_sin_casco"
 # --- PARÁMETROS DE DETECCIÓN ---
 # Umbral de confianza mínimo (0.25 = 25% para detectar impactos más sutiles o moderados)
 CONFIDENCE_THRESHOLD = 0.25
+# Umbrales por clase: la confianza debe ser estrictamente mayor.
+CLASS_CONFIDENCE_THRESHOLDS = {
+    "car": 0.75,
+    "moto": 0.70,
+    "casco": 0.50,
+    "no_casco": 0.50,
+    "crash": 0.60,
+}
+
+
+def passes_detection_threshold(detection):
+    name = detection.get("class_name", "").lower()
+    confidence = detection.get("confidence", 0.0)
+    if name in CLASS_CONFIDENCE_THRESHOLDS:
+        return confidence > CLASS_CONFIDENCE_THRESHOLDS[name]
+    return confidence >= CONFIDENCE_THRESHOLD
+
+
 # 416 acelera el modelo en CPU; usa 640 si necesitas mas detalle a distancia.
 INFERENCE_IMAGE_SIZE = 416
 # Saltar cuadros atrasados de archivos para mantener el ritmo del video.
 # Al guardar el video de salida se analizan todos los cuadros.
 REALTIME_VIDEO_PLAYBACK = True
+INFERENCE_CPU_THREADS = 4
+# Segunda pasada sobre recortes originales de motos y ocupantes.
+HELMET_FOCUS_ENABLED = True
+HELMET_FOCUS_IMAGE_SIZE = 416
+HELMET_FOCUS_CPU_THREADS = 2
+HELMET_FOCUS_MAX_MOTOS = 3
+HELMET_FOCUS_MAX_SAMPLE_GAP = 0.6
 # Filtro exclusivo de choques; no afecta la deteccion de vehiculos.
 CRASH_CONFIDENCE_THRESHOLD = 0.60
 CRASH_CONFIRM_FRAMES = 5       # Minimo de frames positivos consecutivos
@@ -69,10 +94,10 @@ CRASH_COOLDOWN_SECONDS = 10.0  # Tiempo minimo entre alertas nuevas
 CRASH_CLEAR_SECONDS = 2.0      # Tiempo sin choque para terminar el evento
 
 # Infracciones de casco: reportes por consola, resumen y capturas opcionales.
-# Misma confirmacion temporal que choques, aplicada a cada moto por separado.
-HELMET_CONFIDENCE_THRESHOLD = CRASH_CONFIDENCE_THRESHOLD
-HELMET_CONFIRM_FRAMES = CRASH_CONFIRM_FRAMES
-HELMET_CONFIRM_SECONDS = CRASH_CONFIRM_SECONDS
+# Confirmacion breve para motos que cruzan rapido; exige evidencia no_casco.
+HELMET_CONFIDENCE_THRESHOLD = CLASS_CONFIDENCE_THRESHOLDS["no_casco"]
+HELMET_CONFIRM_FRAMES = 2
+HELMET_CONFIRM_SECONDS = 0.08
 HELMET_COOLDOWN_SECONDS = CRASH_COOLDOWN_SECONDS
 HELMET_CLEAR_SECONDS = CRASH_CLEAR_SECONDS
 # Zona de cabezas: hasta 1.5 alturas sobre la moto y su mitad superior.

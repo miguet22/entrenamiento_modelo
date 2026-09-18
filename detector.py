@@ -12,7 +12,9 @@ class CrashDetector:
     def __init__(self, model_path: str = config.MODEL_PATH,
                  crash_classes: List[str] = config.CRASH_CLASS_NAMES,
                  conf_threshold: float = config.CONFIDENCE_THRESHOLD,
-                 use_roboflow_api: bool = config.USE_ROBOFLOW_API):
+                 use_roboflow_api: bool = config.USE_ROBOFLOW_API,
+                 image_size: int = config.INFERENCE_IMAGE_SIZE,
+                 cpu_threads: int = config.INFERENCE_CPU_THREADS):
         self.model_path = model_path
         self.crash_classes = [c.lower() for c in crash_classes]
         self.conf_threshold = conf_threshold
@@ -20,6 +22,8 @@ class CrashDetector:
         self.model = None
         self.model_type = "mock"
         self.rf_client = None
+        self.image_size = image_size
+        self.cpu_threads = cpu_threads
 
         self._init_detector()
 
@@ -51,6 +55,9 @@ class CrashDetector:
         # Intentar cargar con Ultralytics (YOLO)
         try:
             from ultralytics import YOLO
+            import torch
+            if not torch.cuda.is_available():
+                torch.set_num_threads(self.cpu_threads)
             self.model = YOLO(self.model_path)
             self.model_type = "yolo"
             print(f"[OK] Modelo YOLO cargado con éxito desde: {self.model_path}")
@@ -91,7 +98,7 @@ class CrashDetector:
 
         if self.model_type == "yolo" and self.model is not None:
             results = self.model(frame, conf=self.conf_threshold,
-                                 imgsz=config.INFERENCE_IMAGE_SIZE, verbose=False)
+                                 imgsz=self.image_size, verbose=False)
             for r in results:
                 boxes = r.boxes
                 for box in boxes:
@@ -135,4 +142,4 @@ class CrashDetector:
             except Exception as e:
                 pass
 
-        return detections
+        return [d for d in detections if config.passes_detection_threshold(d)]
