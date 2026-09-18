@@ -90,7 +90,8 @@ class CrashDetector:
         detections = []
 
         if self.model_type == "yolo" and self.model is not None:
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            results = self.model(frame, conf=self.conf_threshold,
+                                 imgsz=config.INFERENCE_IMAGE_SIZE, verbose=False)
             for r in results:
                 boxes = r.boxes
                 for box in boxes:

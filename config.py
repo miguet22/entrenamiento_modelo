@@ -50,10 +50,17 @@ DEFAULT_CAMERA_URL = "http://192.168.1.100:8080/video"
 # Guardar automáticamente una captura (.jpg) cuando se detecte un choque
 AUTO_SAVE_CRASH_SNAPSHOT = True
 SNAPSHOTS_DIR = "snapshots_choques"
+AUTO_SAVE_HELMET_SNAPSHOT = True
+HELMET_SNAPSHOTS_DIR = "snapshots_sin_casco"
 
 # --- PARÁMETROS DE DETECCIÓN ---
 # Umbral de confianza mínimo (0.25 = 25% para detectar impactos más sutiles o moderados)
 CONFIDENCE_THRESHOLD = 0.25
+# 416 acelera el modelo en CPU; usa 640 si necesitas mas detalle a distancia.
+INFERENCE_IMAGE_SIZE = 416
+# Saltar cuadros atrasados de archivos para mantener el ritmo del video.
+# Al guardar el video de salida se analizan todos los cuadros.
+REALTIME_VIDEO_PLAYBACK = True
 # Filtro exclusivo de choques; no afecta la deteccion de vehiculos.
 CRASH_CONFIDENCE_THRESHOLD = 0.60
 CRASH_CONFIRM_FRAMES = 5       # Minimo de frames positivos consecutivos
@@ -61,7 +68,7 @@ CRASH_CONFIRM_SECONDS = 0.5    # Tambien deben persistir este tiempo
 CRASH_COOLDOWN_SECONDS = 10.0  # Tiempo minimo entre alertas nuevas
 CRASH_CLEAR_SECONDS = 2.0      # Tiempo sin choque para terminar el evento
 
-# Infracciones de casco: solo reportes por consola y resumen, sin capturas.
+# Infracciones de casco: reportes por consola, resumen y capturas opcionales.
 # Misma confirmacion temporal que choques, aplicada a cada moto por separado.
 HELMET_CONFIDENCE_THRESHOLD = CRASH_CONFIDENCE_THRESHOLD
 HELMET_CONFIRM_FRAMES = CRASH_CONFIRM_FRAMES

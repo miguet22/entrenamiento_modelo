@@ -17,6 +17,7 @@ from file_picker import select_video_file
 from detector import CrashDetector
 from crash_filter import CrashFilter
 from helmet_monitor import HelmetMonitor
+from live_capture import LatestFrameCapture
 
 # Inicializar colorama para colores en la consola
 init(autoreset=True)
@@ -133,6 +134,9 @@ def main():
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if is_live_stream:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap = LatestFrameCapture(cap)
 
     print(Fore.WHITE + f"\n[3/3] Información de la Fuente:")
     print(Fore.LIGHTCYAN_EX + f"    • Origen     : {source_name}")
@@ -175,8 +179,24 @@ def main():
         min_iou=config.MOTO_TRACK_MIN_IOU,
     )
 
+    realtime_playback = (not is_live_stream and config.REALTIME_VIDEO_PLAYBACK
+                         and not config.SAVE_OUTPUT_VIDEO)
+    playback_start = time.monotonic()
+    analyzed_frames = 0
+    skipped_frames = 0
     try:
         while True:
+            if realtime_playback:
+                # Descartar cuadros vencidos sin ejecutar IA sobre ellos.
+                target_frame = int((time.monotonic() - playback_start) * fps)
+                while frame_idx < target_frame:
+                    if not cap.grab():
+                        break
+                    frame_idx += 1
+                    skipped_frames += 1
+                delay = frame_idx / fps - (time.monotonic() - playback_start)
+                if delay > 0:
+                    time.sleep(delay)
             ret, frame = cap.read()
             if not ret:
                 if choice == "3":
@@ -192,6 +212,7 @@ def main():
                     break
 
             frame_idx += 1
+            analyzed_frames += 1
             if not is_live_stream:
                 current_time_sec = frame_idx / fps
                 time_str = format_timestamp(current_time_sec)
@@ -221,6 +242,19 @@ def main():
                     f"| Moto #{report['moto_id']} | Al menos un ocupante sin casco " +
                     Fore.GREEN + f"| Confianza: {report['violation_confidence'] * 100:.1f}%"
                 )
+                if config.AUTO_SAVE_HELMET_SNAPSHOT:
+                    try:
+                        os.makedirs(config.HELMET_SNAPSHOTS_DIR, exist_ok=True)
+                        snap_name = (
+                            f"sin_casco_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                            f"_moto{report['moto_id']}_f{frame_idx}.jpg"
+                        )
+                        snap_path = os.path.join(config.HELMET_SNAPSHOTS_DIR, snap_name)
+                        if not cv2.imwrite(snap_path, frame):
+                            raise OSError("No se pudo escribir la imagen")
+                        print(Fore.LIGHTGREEN_EX + f"    Captura guardada en: {snap_path}")
+                    except (OSError, cv2.error) as exc:
+                        print(Fore.RED + f"    [ERROR] No se pudo guardar la captura sin casco: {exc}")
             new_event = crash_filter.update(has_crash, event_time)
             confirmed_crash = has_crash and crash_filter.active
 
@@ -302,13 +336,11 @@ def main():
                     out_writer.write(annotated_frame)
 
                 if config.SHOW_PREVIEW:
-                    display_frame = annotated_frame
-                    if width > 1280 or height > 720:
-                        scale = min(1280 / width, 720 / height)
-                        display_frame = cv2.resize(annotated_frame, (int(width * scale), int(height * scale)))
-
                     win_title = f"Detector de Choques - EN VIVO ({camera_type})" if is_live_stream else "Detector de Choques - Video"
-                    cv2.imshow(win_title, display_frame)
+                    if analyzed_frames == 1:
+                        cv2.namedWindow(win_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+                        cv2.resizeWindow(win_title, 1600, 900)
+                    cv2.imshow(win_title, annotated_frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         print(Fore.YELLOW + "\n[!] Análisis detenido por el usuario.")
                         break
@@ -327,7 +359,9 @@ def main():
     print("\n" + Fore.CYAN + Style.BRIGHT + "=" * 70)
     print(Fore.CYAN + Style.BRIGHT + "                     RESUMEN DE ANÁLISIS                      ")
     print(Fore.CYAN + Style.BRIGHT + "=" * 70)
-    print(Fore.WHITE + f"Total de frames analizados: {frame_idx}")
+    print(Fore.WHITE + f"Total de frames analizados: {analyzed_frames}")
+    if skipped_frames:
+        print(Fore.WHITE + f"Frames omitidos para mantener tiempo real: {skipped_frames}")
     print(Fore.WHITE + f"Total de eventos de choque detectados: {len(crash_events)}")
     print(Fore.WHITE + f"Total de infracciones por falta de casco: {len(helmet_events)}")
     for ev in helmet_events:

@@ -123,7 +123,7 @@ class HelmetMonitorTests(unittest.TestCase):
 
 
 class HelmetReportingTests(unittest.TestCase):
-    def test_main_reports_once_in_console_and_summary_without_snapshot(self):
+    def test_main_reports_once_and_saves_one_snapshot(self):
         import main
 
         capture = Mock()
@@ -147,13 +147,16 @@ class HelmetReportingTests(unittest.TestCase):
             stack.enter_context(patch.object(main.os, 'makedirs'))
             stack.enter_context(patch.multiple(main.config, SHOW_PREVIEW=False,
                                                SAVE_OUTPUT_VIDEO=False,
-                                               AUTO_SAVE_CRASH_SNAPSHOT=True))
+                                               AUTO_SAVE_CRASH_SNAPSHOT=True,
+                                               AUTO_SAVE_HELMET_SNAPSHOT=True))
             stack.enter_context(redirect_stdout(output))
             main.main()
         self.assertEqual(output.getvalue().count('[INFRACCION: SIN CASCO]'), 1)
         self.assertIn('Total de infracciones por falta de casco: 1', output.getvalue())
         self.assertIn('Total de eventos de choque detectados: 0', output.getvalue())
-        snapshot.assert_not_called()
+        snapshot.assert_called_once()
+        self.assertTrue(snapshot.call_args.args[0].startswith(main.config.HELMET_SNAPSHOTS_DIR))
+        self.assertIn('_moto1_', snapshot.call_args.args[0])
         capture.release.assert_called_once()
 
 
