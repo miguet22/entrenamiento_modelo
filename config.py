@@ -60,9 +60,9 @@ CONFIDENCE_THRESHOLD = 0.25
 CLASS_CONFIDENCE_THRESHOLDS = {
     "car": 0.75,
     "moto": 0.70,
-    "casco": 0.50,
-    "no_casco": 0.50,
-    "crash": 0.60,
+    "casco": 0.40,
+    "no_casco": 0.40,
+    "crash": 0.75,
 }
 
 
@@ -87,7 +87,7 @@ HELMET_FOCUS_CPU_THREADS = 2
 HELMET_FOCUS_MAX_MOTOS = 3
 HELMET_FOCUS_MAX_SAMPLE_GAP = 0.6
 # Filtro exclusivo de choques; no afecta la deteccion de vehiculos.
-CRASH_CONFIDENCE_THRESHOLD = 0.60
+CRASH_CONFIDENCE_THRESHOLD = 0.75
 CRASH_CONFIRM_FRAMES = 5       # Minimo de frames positivos consecutivos
 CRASH_CONFIRM_SECONDS = 0.5    # Tambien deben persistir este tiempo
 CRASH_COOLDOWN_SECONDS = 10.0  # Tiempo minimo entre alertas nuevas

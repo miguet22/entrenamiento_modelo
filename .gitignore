@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 snapshots_choques/
 output_analisis.mp4
+service_data/
+service_settings.json

@@ -15,6 +15,8 @@ def detection(name, bbox, confidence=0.9):
 
 
 class HelmetFocusTests(unittest.TestCase):
+    @patch.dict(config.CLASS_CONFIDENCE_THRESHOLDS,
+                dict(car=0.75, moto=0.70, casco=0.50, no_casco=0.50, crash=0.60))
     def test_class_thresholds_require_strictly_higher_confidence(self):
         for name, threshold in [('car', 0.75), ('moto', 0.70),
                                 ('casco', 0.50), ('no_casco', 0.50),
@@ -26,6 +28,7 @@ class HelmetFocusTests(unittest.TestCase):
                 self.assertTrue(config.passes_detection_threshold(
                     detection(name, [0, 0, 10, 10], threshold + 0.01)))
 
+    @patch.dict(config.CLASS_CONFIDENCE_THRESHOLDS, dict(casco=0.50, no_casco=0.50))
     def test_focus_accepts_head_above_fifty_and_rejects_equal_threshold(self):
         detector = Mock()
         detector.predict_frame.return_value = [

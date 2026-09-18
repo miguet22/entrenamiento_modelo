@@ -55,14 +55,17 @@ def focused_detections(detector, crops):
 
 def _worker(jobs, results, stop, ready):
     try:
+        print('[CASCO] Inicializando modelo paralelo...', flush=True)
         from detector import CrashDetector
         detector = CrashDetector(image_size=config.HELMET_FOCUS_IMAGE_SIZE,
                                  cpu_threads=config.HELMET_FOCUS_CPU_THREADS)
         if detector.model_type != 'yolo':
             raise RuntimeError('El enfoque de casco requiere el modelo YOLO local')
+        print('[CASCO] Preparando inferencia...', flush=True)
         import numpy as np
         detector.predict_frame(np.zeros((416, 416, 3), dtype=np.uint8))
         ready.set()
+        print('[CASCO] Modelo paralelo listo.', flush=True)
         monitor = HelmetMonitor(
             confidence=config.HELMET_CONFIDENCE_THRESHOLD,
             min_frames=config.HELMET_CONFIRM_FRAMES,
@@ -74,18 +77,24 @@ def _worker(jobs, results, stop, ready):
             min_iou=config.MOTO_TRACK_MIN_IOU)
         previous_time = None
         previous_epoch = None
+        previous_session = None
         while not stop.is_set():
             try:
                 job = jobs.get(timeout=0.1)
             except Empty:
                 continue
             now = job['event_time']
+            if job['session'] != previous_session:
+                monitor.tracks.clear()
+                monitor.next_id = 1
+                previous_session = job['session']
             if (job['epoch'] != previous_epoch or previous_time is not None
                     and now - previous_time > config.HELMET_FOCUS_MAX_SAMPLE_GAP):
                 monitor.reset_candidates()
             previous_time, previous_epoch = now, job['epoch']
             crops = job.pop('crops')
             detections = focused_detections(detector, crops)
+            job['detections'] = detections
             job['preview'] = None
             if crops:
                 import cv2
@@ -126,6 +135,7 @@ class HelmetFocus:
         self.stop = context.Event()
         self.ready = context.Event()
         self.epoch = 0
+        self.session = 0
         self.serial = 0
         self.last_done = 0
         self.process = context.Process(target=_worker,
@@ -139,11 +149,15 @@ class HelmetFocus:
     def reset(self):
         self.epoch += 1
 
+    def new_session(self):
+        self.reset()
+        self.session += 1
+
     def submit(self, frame, detections, event_time, time_str, frame_idx):
         crops = motorcycle_crops(frame, detections)
         job = dict(crops=crops, event_time=event_time, time=time_str,
                    frame=frame_idx, image=frame.copy() if crops else None,
-                   epoch=self.epoch, serial=self.serial + 1)
+                   epoch=self.epoch, session=self.session, serial=self.serial + 1)
         # Reemplazar el trabajo pendiente por el mas reciente sin esperar a IA.
         try:
             self.jobs.get_nowait()

@@ -3,6 +3,7 @@ Módulo de inferencia y detección con IA.
 Compatible con modelos YOLO (.pt), Roboflow Inference API, ONNX y clasificadores.
 """
 import os
+from pathlib import Path
 from typing import List, Dict, Any
 import cv2
 import numpy as np
@@ -15,7 +16,9 @@ class CrashDetector:
                  use_roboflow_api: bool = config.USE_ROBOFLOW_API,
                  image_size: int = config.INFERENCE_IMAGE_SIZE,
                  cpu_threads: int = config.INFERENCE_CPU_THREADS):
-        self.model_path = model_path
+        path = Path(model_path)
+        self.model_path = str(path if path.is_absolute()
+                              else Path(config.__file__).resolve().parent / path)
         self.crash_classes = [c.lower() for c in crash_classes]
         self.conf_threshold = conf_threshold
         self.use_roboflow_api = use_roboflow_api
