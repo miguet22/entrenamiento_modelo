@@ -91,7 +91,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', default='0', help='0 para webcam, ruta de video o URL RTSP/HTTP')
     parser.add_argument('--url', default='ws://127.0.0.1:8001/ws/live')
-    parser.add_argument('--fps', type=float, default=10)
+    parser.add_argument('--fps', type=float, default=20)
     parser.add_argument('--api-key', default='')
     args = parser.parse_args()
     if not 0 < args.fps <= 30:

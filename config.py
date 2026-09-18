@@ -60,9 +60,9 @@ CONFIDENCE_THRESHOLD = 0.25
 CLASS_CONFIDENCE_THRESHOLDS = {
     "car": 0.75,
     "moto": 0.70,
-    "casco": 0.40,
-    "no_casco": 0.40,
-    "crash": 0.75,
+    "casco": 0.30,
+    "no_casco": 0.30,
+    "crash": 0.10,
 }
 
 
@@ -74,8 +74,9 @@ def passes_detection_threshold(detection):
     return confidence >= CONFIDENCE_THRESHOLD
 
 
-# 416 acelera el modelo en CPU; usa 640 si necesitas mas detalle a distancia.
-INFERENCE_IMAGE_SIZE = 416
+# Entrada principal rapida; el enfoque de cascos conserva recortes a 416.
+INFERENCE_IMAGE_SIZE = 320
+SERVICE_TARGET_FPS = 20
 # Saltar cuadros atrasados de archivos para mantener el ritmo del video.
 # Al guardar el video de salida se analizan todos los cuadros.
 REALTIME_VIDEO_PLAYBACK = True
@@ -87,9 +88,9 @@ HELMET_FOCUS_CPU_THREADS = 2
 HELMET_FOCUS_MAX_MOTOS = 3
 HELMET_FOCUS_MAX_SAMPLE_GAP = 0.6
 # Filtro exclusivo de choques; no afecta la deteccion de vehiculos.
-CRASH_CONFIDENCE_THRESHOLD = 0.75
-CRASH_CONFIRM_FRAMES = 5       # Minimo de frames positivos consecutivos
-CRASH_CONFIRM_SECONDS = 0.5    # Tambien deben persistir este tiempo
+CRASH_CONFIDENCE_THRESHOLD = 0.10
+CRASH_CONFIRM_FRAMES = 2      # Minimo de frames positivos consecutivos
+CRASH_CONFIRM_SECONDS = 0.3    # Tambien deben persistir este tiempo
 CRASH_COOLDOWN_SECONDS = 10.0  # Tiempo minimo entre alertas nuevas
 CRASH_CLEAR_SECONDS = 2.0      # Tiempo sin choque para terminar el evento
 

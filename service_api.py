@@ -289,7 +289,7 @@ class LiveSession:
         if self.runtime.focus is not None:
             self.runtime.focus.new_session()
         await self.websocket.send_json(dict(type='ready', stream_id=self.stream_id,
-            protocol_version=1, recommended_fps=10, max_packet_bytes=MAX_PACKET_BYTES,
+            protocol_version=1, recommended_fps=config.SERVICE_TARGET_FPS, max_packet_bytes=MAX_PACKET_BYTES,
             thresholds=config.CLASS_CONFIDENCE_THRESHOLDS,
             helmet_focus=self.runtime.focus is not None))
         tasks = [asyncio.create_task(function()) for function in

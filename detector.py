@@ -20,7 +20,10 @@ class CrashDetector:
         self.model_path = str(path if path.is_absolute()
                               else Path(config.__file__).resolve().parent / path)
         self.crash_classes = [c.lower() for c in crash_classes]
-        self.conf_threshold = conf_threshold
+        # Inference must preserve candidates accepted by the per-class filters.
+        self.conf_threshold = min(conf_threshold,
+                                  *config.CLASS_CONFIDENCE_THRESHOLDS.values(),
+                                  config.CRASH_CONFIDENCE_THRESHOLD)
         self.use_roboflow_api = use_roboflow_api
         self.model = None
         self.model_type = "mock"
