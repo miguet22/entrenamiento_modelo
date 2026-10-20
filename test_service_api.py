@@ -85,12 +85,23 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual((result['width'], result['height']), (120, 80))
         self.assertEqual(self.detector.calls, 3)  # calentamiento + dos cuadros
 
-    def test_rejects_second_stream_and_accepts_reconnect(self):
+    def test_accepts_two_streams_and_rejects_only_over_capacity(self):
         client = self.client()
         with client.websocket_connect('/ws/live') as first:
-            first.receive_json()
+            first_ready = first.receive_json()
             with client.websocket_connect('/ws/live') as second:
-                self.assertEqual(second.receive_json()['code'], 'busy')
+                second_ready = second.receive_json()
+                self.assertNotEqual(first_ready['stream_id'], second_ready['stream_id'])
+                health = client.get('/health').json()
+                self.assertEqual(len(health['active_streams']), 2)
+                self.assertEqual(health['max_connections'], 2)
+                self.assertEqual(health['version'], '1.1.0')
+                with client.websocket_connect('/ws/live') as third:
+                    self.assertEqual(third.receive_json()['code'], 'busy')
+                first.send_bytes(packet(1, 100))
+                second.send_bytes(packet(1, 100))
+                self.assertEqual(first.receive_json()['type'], 'detections')
+                self.assertEqual(second.receive_json()['type'], 'detections')
         with client.websocket_connect('/ws/live') as socket:
             self.assertEqual(socket.receive_json()['type'], 'ready')
 
@@ -158,6 +169,7 @@ class ServiceTests(unittest.TestCase):
 
         async def check():
             session = LiveSession(self.runtime, Mock())
+            session.focus = focus
             session.metadata[3] = FramePacket(900, 123.4, b'')
             task = asyncio.create_task(session.poll_helmets())
             detection = await asyncio.wait_for(session.outgoing.get(), 2)

@@ -30,6 +30,7 @@ class CrashDetector:
         self.rf_client = None
         self.image_size = image_size
         self.cpu_threads = cpu_threads
+        self.device = "cpu"
 
         self._init_detector()
 
@@ -62,11 +63,18 @@ class CrashDetector:
         try:
             from ultralytics import YOLO
             import torch
-            if not torch.cuda.is_available():
+            if torch.cuda.is_available():
+                self.device = 0
+                device_name = torch.cuda.get_device_name(self.device)
+                print(f"[GPU] CUDA disponible: {device_name}")
+            else:
                 torch.set_num_threads(self.cpu_threads)
+                print("[CPU] CUDA no disponible; la inferencia usará CPU.")
             self.model = YOLO(self.model_path)
             self.model_type = "yolo"
+            self.model.to(self.device)
             print(f"[OK] Modelo YOLO cargado con éxito desde: {self.model_path}")
+            print(f"[INFO] Dispositivo de inferencia: {'cuda:0' if self.device == 0 else self.device}")
             if hasattr(self.model, 'names'):
                 print(f"[INFO] Clases del modelo: {self.model.names}")
             return
@@ -104,7 +112,8 @@ class CrashDetector:
 
         if self.model_type == "yolo" and self.model is not None:
             results = self.model(frame, conf=self.conf_threshold,
-                                 imgsz=self.image_size, verbose=False)
+                                 imgsz=self.image_size, device=self.device,
+                                 verbose=False)
             for r in results:
                 boxes = r.boxes
                 for box in boxes:

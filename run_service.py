@@ -16,11 +16,15 @@ def build_server():
     host = os.environ.get('DETECTION_HOST', settings.get('host', '127.0.0.1'))
     port = int(os.environ.get('DETECTION_PORT', settings.get('port', 8001)))
     api_key = os.environ.get('DETECTION_API_KEY', settings.get('api_key', ''))
+    max_connections = int(os.environ.get(
+        'DETECTION_MAX_CONNECTIONS', settings.get('max_connections', 2)))
     if not 1 <= port <= 65535:
         raise ValueError('Puerto fuera de rango')
+    if max_connections < 2:
+        raise ValueError('DETECTION_MAX_CONNECTIONS debe ser al menos 2')
     if host not in ('127.0.0.1', 'localhost', '::1') and not api_key:
         raise RuntimeError('Configura DETECTION_API_KEY para escuchar fuera de localhost')
-    app = create_app(api_key=api_key)
+    app = create_app(api_key=api_key, max_connections=max_connections)
     server = uvicorn.Server(uvicorn.Config(
         app, host=host, port=port, workers=1,
         ws_max_size=MAX_PACKET_BYTES, ws_max_queue=1,

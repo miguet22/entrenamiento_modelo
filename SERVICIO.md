@@ -1,10 +1,11 @@
 # Servicio de deteccion en vivo
 
-El servidor carga YOLO y el proceso paralelo de cascos una vez al iniciar.
-Funciona sin ventanas, explorador de archivos ni preguntas por consola.
-La app cliente captura el video, envia cuadros y recibe detecciones y eventos
-por un WebSocket. Esta primera version admite **una transmision activa**.
-Otra conexion recibe `busy`; puede consultar `/health` y `/events` por HTTP.
+El servidor carga YOLO al iniciar y admite por defecto **dos transmisiones
+WebSocket simultaneas**, cada una con un proceso de seguimiento de casco
+independiente. La capacidad se puede ampliar con `max_connections`, teniendo
+en cuenta los recursos disponibles. Funciona sin ventanas, explorador de
+archivos ni preguntas por consola. Una conexion por encima del limite recibe
+`busy`; `/health` publica la version, las sesiones activas y la capacidad.
 
 ## Preparacion e inicio
 
@@ -17,7 +18,8 @@ Desde la carpeta del proyecto:
 
 Tambien podes abrir `iniciar_servicio.bat`. Espera a que aparezca
 `Application startup complete`. Consulta `http://127.0.0.1:8001/health`:
-`status: ready` indica que ambos modelos estan preparados.
+`status: ready` indica que el modelo principal esta preparado; cada conexion
+inicializa su proceso aislado para seguimiento de casco.
 La documentacion HTTP esta en `http://127.0.0.1:8001/docs`.
 El protocolo WebSocket esta documentado abajo.
 
@@ -151,7 +153,9 @@ function sendFrame(jpegBlob, frameId, timestampMs) {
 ## Configurar puerto o acceso desde otra PC
 
 Por defecto escucha solo en esta PC. Copia `service_settings.example.json`
-a `service_settings.json` para cambiar host, puerto o clave. Para otra PC,
+a `service_settings.json` para cambiar host, puerto, clave o capacidad
+(`max_connections`, por defecto 2). Tambien se puede fijar la capacidad con
+`DETECTION_MAX_CONNECTIONS`; debe ser al menos 2. Para otra PC,
 usa `host: 0.0.0.0` y configura `api_key`; es obligatoria fuera de localhost.
 Tu app conecta a la IP del equipo detector. El instalador no modifica el
 firewall; la conectividad debe habilitarse segun la red donde lo despliegues.
@@ -160,8 +164,8 @@ HTTP: envia `x-api-key`. WebSocket: mismo header o `?token=CLAVE` para
 clientes de navegador. Fuera de una red confiable, publica mediante un
 proxy HTTPS/WSS. `/health` permite consultar estado sin clave.
 
-Tambien se aceptan `DETECTION_HOST`, `DETECTION_PORT` y
-`DETECTION_API_KEY`; tienen prioridad sobre el archivo de configuracion.
+Tambien se aceptan `DETECTION_HOST`, `DETECTION_PORT`, `DETECTION_API_KEY` y
+`DETECTION_MAX_CONNECTIONS`; tienen prioridad sobre el archivo de configuracion.
 Para el servicio Windows es mas directo usar el archivo de configuracion.
 
 Referencias: [WebSocket de FastAPI](https://fastapi.tiangolo.com/advanced/websockets/)

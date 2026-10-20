@@ -1,4 +1,4 @@
-"""API local de deteccion en vivo. Un modelo y una transmision activa."""
+"""API local de deteccion en vivo con varias sesiones independientes."""
 
 import asyncio
 import base64
@@ -98,14 +98,14 @@ def make_helmet_monitor():
 
 class DetectionRuntime:
     def __init__(self, detector_factory=CrashDetector, focus_factory=HelmetFocus,
-                 data_dir=None):
+                 data_dir=None, max_connections=2):
         self.detector_factory = detector_factory
         self.focus_factory = focus_factory
         self.data_dir = Path(data_dir or ROOT / 'service_data')
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='detector')
         self.detector = None
-        self.focus = None
-        self.active_stream = None
+        self.max_connections = max(1, int(max_connections))
+        self.active_streams = {}
         self.events = deque(maxlen=200)
         self.started = time.monotonic()
         self.ready = False
@@ -129,17 +129,10 @@ class DetectionRuntime:
         if self.detector.model_type != 'yolo':
             raise RuntimeError('No se pudo cargar el modelo YOLO local')
         self.detector.predict_frame(np.zeros((416, 416, 3), dtype=np.uint8))
-        if config.HELMET_FOCUS_ENABLED:
-            self.focus = self.focus_factory()
-            for result in self.focus.poll():
-                if 'error' in result:
-                    raise RuntimeError(result['error'])
         self.ready = True
 
     def shutdown(self):
         self.ready = False
-        if self.focus is not None:
-            self.focus.close()
         self.executor.shutdown(wait=True, cancel_futures=True)
 
     def save_snapshot(self, image, kind):
@@ -169,6 +162,7 @@ class LiveSession:
         self.last_processed_time = None
         self.dropped = 0
         self.sequence = 0
+        self.focus = None
         self.helmet_monitor = make_helmet_monitor()
         self.crash_filter = CrashFilter(
             min_frames=config.CRASH_CONFIRM_FRAMES,
@@ -247,9 +241,9 @@ class LiveSession:
                 self.crash_filter.reset_candidate()
                 self.helmet_monitor.reset_candidates()
             self.last_processed_time = now
-            if self.runtime.focus is not None:
-                self.runtime.focus.submit(image, detections, now,
-                                          str(packet.timestamp_ms), self.sequence)
+            if self.focus is not None:
+                self.focus.submit(image, detections, now,
+                                  str(packet.timestamp_ms), self.sequence)
             else:
                 await self.emit_helmet_reports(packet,
                     self.helmet_monitor.update(detections, now), image)
@@ -268,7 +262,7 @@ class LiveSession:
 
     async def poll_helmets(self):
         while True:
-            focus = self.runtime.focus
+            focus = self.focus
             if focus is not None:
                 for result in focus.poll():
                     if 'error' in result:
@@ -286,12 +280,15 @@ class LiveSession:
             await asyncio.sleep(0.02)
 
     async def run(self):
-        if self.runtime.focus is not None:
-            self.runtime.focus.new_session()
+        if config.HELMET_FOCUS_ENABLED:
+            # Cada conexion necesita su propio tracker de casco para mantener
+            # separados los estados temporales de las distintas camaras.
+            self.focus = await asyncio.to_thread(self.runtime.focus_factory)
+            self.focus.new_session()
         await self.websocket.send_json(dict(type='ready', stream_id=self.stream_id,
             protocol_version=1, recommended_fps=config.SERVICE_TARGET_FPS, max_packet_bytes=MAX_PACKET_BYTES,
             thresholds=config.CLASS_CONFIDENCE_THRESHOLDS,
-            helmet_focus=self.runtime.focus is not None))
+            helmet_focus=self.focus is not None))
         tasks = [asyncio.create_task(function()) for function in
                  (self.receive, self.send, self.process, self.poll_helmets)]
         try:
@@ -305,12 +302,14 @@ class LiveSession:
                 await asyncio.gather(*tasks, return_exceptions=True)
                 # Esperar la inferencia en curso antes de admitir otra sesion.
                 await self.runtime.run(lambda: None)
-                if self.runtime.focus is not None:
-                    self.runtime.focus.new_session()
+                if self.focus is not None:
+                    await asyncio.to_thread(self.focus.close)
 
 
-def create_app(runtime=None, api_key=None):
-    runtime = runtime or DetectionRuntime()
+def create_app(runtime=None, api_key=None, max_connections=None):
+    runtime = runtime or DetectionRuntime(max_connections=max_connections or 2)
+    capacity = max(1, int(runtime.max_connections if max_connections is None else max_connections))
+    runtime.max_connections = capacity
     api_key = api_key if api_key is not None else os.environ.get('DETECTION_API_KEY', '')
 
     @asynccontextmanager
@@ -322,7 +321,7 @@ def create_app(runtime=None, api_key=None):
             # No usar el mismo executor para shutdown(): esperaria su propio hilo.
             await asyncio.to_thread(runtime.shutdown)
 
-    app = FastAPI(title='Deteccion de video en vivo', version='1.0.0', lifespan=lifespan)
+    app = FastAPI(title='Deteccion de video en vivo', version='1.1.0', lifespan=lifespan)
     app.state.runtime = runtime
 
     def authorized(token):
@@ -336,8 +335,11 @@ def create_app(runtime=None, api_key=None):
     @app.get('/health')
     async def health():
         return dict(status='ready' if runtime.ready else 'starting',
-                    active_stream=runtime.active_stream,
-                    helmet_focus=runtime.focus is not None,
+                    version=app.version,
+                    active_stream=next(iter(runtime.active_streams), None),
+                    active_streams=list(runtime.active_streams),
+                    max_connections=capacity,
+                    helmet_focus=config.HELMET_FOCUS_ENABLED,
                     thresholds=config.CLASS_CONFIDENCE_THRESHOLDS,
                     uptime_seconds=round(time.monotonic() - runtime.started, 1))
 
@@ -368,13 +370,13 @@ def create_app(runtime=None, api_key=None):
                 message='El detector no esta disponible'))
             await websocket.close(code=1013)
             return
-        if runtime.active_stream is not None:
+        if len(runtime.active_streams) >= capacity:
             await websocket.send_json(dict(type='error', code='busy',
-                message='Ya hay una transmision activa'))
+                message='Se alcanzo la capacidad de transmisiones activas'))
             await websocket.close(code=1013)
             return
         session = LiveSession(runtime, websocket)
-        runtime.active_stream = session.stream_id
+        runtime.active_streams[session.stream_id] = session
         try:
             await session.run()
         except WebSocketDisconnect:
@@ -383,12 +385,11 @@ def create_app(runtime=None, api_key=None):
             pass
         except Exception as exc:
             LOGGER.exception('Fallo procesando la transmision %s', session.stream_id)
-            runtime.fail(exc)
             try:
                 await websocket.close(code=1011, reason='Error de procesamiento')
             except RuntimeError:
                 pass
         finally:
-            runtime.active_stream = None
+            runtime.active_streams.pop(session.stream_id, None)
 
     return app
