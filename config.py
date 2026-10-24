@@ -2,6 +2,7 @@
 Configuración general del detector de choques en video.
 Modifica estos valores según el modelo y tus preferencias.
 """
+import os
 from pathlib import Path
 
 # --- RUTA DEL MODELO ---
@@ -9,7 +10,7 @@ from pathlib import Path
 MODEL_PATH = "weights/best.pt"
 
 # Soporte opcional para inferencia directa con Roboflow (API)
-ROBOFLOW_API_KEY = "ygnvNU2VSJC9icjhS9XH"
+ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "")
 ROBOFLOW_MODEL_ID = "accidentes-utn/2"
 USE_ROBOFLOW_API = False  # Cambia a True si deseas inferir directamente por API sin descargar el .pt
 

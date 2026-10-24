@@ -31,7 +31,9 @@ from helmet_monitor import HelmetMonitor
 
 LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent
-MAX_PACKET_BYTES = 6 * 1024 * 1024
+# Modal limita cada mensaje WebSocket a 2 MiB. Mantener este tope tambien
+# localmente evita que el cliente acepte paquetes que fallarian al publicarlo.
+MAX_PACKET_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_PIXELS = 8_294_400
 
 
