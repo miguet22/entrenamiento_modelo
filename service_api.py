@@ -323,7 +323,7 @@ def create_app(runtime=None, api_key=None, max_connections=None):
             # No usar el mismo executor para shutdown(): esperaria su propio hilo.
             await asyncio.to_thread(runtime.shutdown)
 
-    app = FastAPI(title='Deteccion de video en vivo', version='1.1.0', lifespan=lifespan)
+    app = FastAPI(title='Deteccion de video en vivo', version='1.2.0', lifespan=lifespan)
     app.state.runtime = runtime
 
     def authorized(token):
@@ -339,7 +339,9 @@ def create_app(runtime=None, api_key=None, max_connections=None):
         return dict(status='ready' if runtime.ready else 'starting',
                     version=app.version,
                     active_stream=next(iter(runtime.active_streams), None),
-                    active_streams=list(runtime.active_streams),
+                    active_streams=len(runtime.active_streams),
+                    active_stream_ids=list(runtime.active_streams),
+                    max_concurrent_streams=capacity,
                     max_connections=capacity,
                     helmet_focus=config.HELMET_FOCUS_ENABLED,
                     thresholds=config.CLASS_CONFIDENCE_THRESHOLDS,
@@ -373,7 +375,7 @@ def create_app(runtime=None, api_key=None, max_connections=None):
             await websocket.close(code=1013)
             return
         if len(runtime.active_streams) >= capacity:
-            await websocket.send_json(dict(type='error', code='busy',
+            await websocket.send_json(dict(type='error', code='STREAM_CAPACITY_REACHED',
                 message='Se alcanzo la capacidad de transmisiones activas'))
             await websocket.close(code=1013)
             return

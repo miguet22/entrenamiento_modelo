@@ -5,7 +5,10 @@ WebSocket simultaneas**, cada una con un proceso de seguimiento de casco
 independiente. La capacidad se puede ampliar con `max_connections`, teniendo
 en cuenta los recursos disponibles. Funciona sin ventanas, explorador de
 archivos ni preguntas por consola. Una conexion por encima del limite recibe
-`busy`; `/health` publica la version, las sesiones activas y la capacidad.
+`STREAM_CAPACITY_REACHED`; `/health` publica el conteo entero `active_streams`
+y el maximo `max_concurrent_streams`. `active_stream_ids` expone los
+identificadores activos, mientras `max_connections` se conserva como alias
+para clientes anteriores.
 
 ## Preparacion e inicio
 
